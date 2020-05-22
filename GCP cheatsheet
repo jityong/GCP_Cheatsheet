@@ -8,14 +8,13 @@
   - [Create A HTTP Proxy](#Create-HTTP-Proxy)
   - [Create Global Forwarding Rule](#Create-Global-Forwarding-Rule)
  
-[Firewall Rules](#Firewall-Rules)
-
 [Instance Templates & Groups](#Instance-Templates-&-Groups)
 
 - [Create NGINX Web Server Clusters](#Create-NGINX-Web-Server-Clusters)
 - [Create Instance Templates](#Create-Instance-Templates)
 - [Create MIG](#Create-MIG)
-- [Create Target Group](#Create-Target-Group)
+- [Create Target Pool](#Create-Target-Pool)
+- [Set Firewall Rule](#Firewall-Rules)  
 
 [Kubernetes](#Kubernetes)
 - [Create a KE cluster](#Create-a-ke-cluster)
@@ -56,6 +55,8 @@
    - [VPC Network Peering]([#VPC-Network-Peering](https://www.qwiklabs.com/focuses/964?parent=catalog))
    - [User Authentication: Identity-Aware Proxy](https://www.qwiklabs.com/focuses/5562?parent=catalog)
 
+[Questions](#Questions)
+
 # Setup
 1. `gcloud config set project [PROJECT_ID]`
 2. Set basic configs
@@ -73,20 +74,18 @@ gcloud compute forwarding-rules create [lb-name] \
 > Allows you to balance the system's load based on incoming IP protocol data. IE: address, port, and protocol type.
 
 ## Create HTTP(s) LB
-* Remember to perform a [health check](#Health-Check) first!
+Overview:  
+HTTP traffic arrives at LB --> Global Forwarding Rule --> HTTP PROXY --> Backend Svc --> Backend group --> MIG's named port
+> * Remember to create a [health check](#Health-Check) first! (Used by backend svc creation)
 ```
 gcloud compute instance-groups managed \
        set-named-ports [MIG (created)] \
        --named-ports http:[port_num]
 ```
 > Maps a port name to the relevant port for the `MIG` --> LB svc can now forward traffic to named port.
-# Firewall Rules
-```
-gcloud compute firewall-rules create [Firewall_RuleName(new)] --allow [rule]
-```
-> ie: rule can be `tcp:80`, which allows connections to the machines on port 80 via the `EXTERNAL_IP` addresses
 
 ### Create Backend Service
+* Backend services define groups of backends that can receive traffic. 
 ```
 gcloud compute backend-services create [backend_name(new)] \
       --protocol HTTP --http-health-checks http-basic-check --global
@@ -95,14 +94,17 @@ gcloud compute backend-services create [backend_name(new)] \
 > * These settings provide fine-grained control over how your load balancer behaves.
 
 ### Create Default URL Map
+About URL Map: 
+* When a request arrives at the load balancer, the load balancer routes the request to a particular backend service or backend bucket based on configurations in a URL map.
 ```
 gcloud compute url-maps create [Map_name(new)] \
     --default-service [Backend_svc(created)]
 ```
-> A default URL map that directs all incoming requests to all your backend instances
+> * A default URL map that directs all incoming requests to the specified backend svc(group)
 
 ### Create HTTP Proxy
-``` gcloud compute target-http-proxies create [Poxy_name(new)] \
+``` 
+gcloud compute target-http-proxies create [Poxy_name(new)] \
     --url-map [Url_map(created)]
 ```
 > Routes request to the URL map
@@ -117,8 +119,14 @@ gcloud compute forwarding-rules create http-content-rule \
 
 Check your forwarding rules [here](##List-Forwarding-Rules)!
 > * Handles and routes incoming requests.
-> * Dends traffic to a specific target HTTP or HTTPS proxy depending on the IP address, IP protocol, and port specified. 
+> * Sends traffic to a specific target HTTP or HTTPS proxy depending on the IP address, IP protocol, and port specified. 
 > * The global forwarding rule does not support multiple ports.
+
+# Firewall Rules
+```
+gcloud compute firewall-rules create [Firewall_RuleName(new)] --allow [rule]
+```
+> ie: rule can be `tcp:80`, which allows connections to the machines on port 80 via the `EXTERNAL_IP` addresses
 
 # Instance Templates & Groups
 
@@ -156,11 +164,11 @@ gcloud compute instance-groups managed create [Group_Name(new)] \
 ```
 > --base-instance-name is the name that will get prefixed with the created VMs in this MIG
 
-## Create Target Group
+## Create Target Pool
 ```
 gcloud compute target-pools create [Pool_Name]
 ```
->  A target pool allows a single access point to all the instances in a group and is necessary for load balancing in the future steps.
+>  A target pool allows a single access point to all the instances in a group and is necessary for load balancing (network)  in the future steps.
 
 # Virtual Machines
 
@@ -377,3 +385,8 @@ gcloud compute http-health-checks create http-basic-check
 
 
 
+# Questions
+- Using firewall to allow tcp:80 to be able to connect to external IP of instances VS exposing a port of clusters using LB? 
+- Creating forwarding rule == creating Network LB?
+- Backend-services add MIG?
+> Backend services created through this command will start out without any backend groups. To add backend groups, use 'gcloud compute backend-services add-backend' or 'gcloud compute backend-services edit'.
