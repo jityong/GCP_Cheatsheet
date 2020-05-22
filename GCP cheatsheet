@@ -1,0 +1,379 @@
+[On Starting GCloud CLI](#Setup)
+
+[Load Balancers](#Load-Balancers)
+- [Create A Network Load Balancer](#Create-Network-Load-Balancer)
+- [Create A HTTP(s) Load Balancer](#Create-HTTP(s)-LB)
+  - [Create A Backend Service](#Create-Backend-Service)
+  - [Create A Default URL Map](#Create-Default-URL-Map)
+  - [Create A HTTP Proxy](#Create-HTTP-Proxy)
+  - [Create Global Forwarding Rule](#Create-Global-Forwarding-Rule)
+ 
+[Firewall Rules](#Firewall-Rules)
+
+[Instance Templates & Groups](#Instance-Templates-&-Groups)
+
+- [Create NGINX Web Server Clusters](#Create-NGINX-Web-Server-Clusters)
+- [Create Instance Templates](#Create-Instance-Templates)
+- [Create MIG](#Create-MIG)
+- [Create Target Group](#Create-Target-Group)
+
+[Kubernetes](#Kubernetes)
+- [Create a KE cluster](#Create-a-ke-cluster)
+- [Get Authentication Credentials For Cluster](#Get-Authentication-Credentials-For-Cluster)
+- [Deploy An Application To Cluster](#Deploy-appplication-to-cluster)
+- [K8s Services](#K8s-Service)
+  - [Expose K8s Cluster](#Expose-K8s-Cluster)
+- [Delete cluster](#Delete-Cluster)
+
+[VMs](#Virtual-Machines)
+- [Create VM Instance](#Create-VM-Instance)  
+  - [SSH Into VM](SSH-Into-VM)  
+  
+[IAM Custom Roles](#IAM-Custom-Roles)
+- [Get Available Permissions](#List-Of-Available-Permissions)
+- [Get Role Metadata](#Get-role-metadata)
+- [Get Grantable Roles](#Get-Grantable-Roles)
+- [Get Existing Custom Roles](#Get-Custom-Roles)
+- [Create A Custom Role](#Create-A-Custom-Role)
+  - [Using YAML File](#Create-Using-YAML-File)
+  - [Using Flags](#Create-Using-Flags)
+- [Update Existing Custom Role](#Update-Existing-Custom-Role)
+  - [Update Using YAML File](#Update-Using-YAML-File)
+  - [Update Using Flags](#Update-Using-Flags)
+- [Disable Custom Role](#Disable-Custom-Role)
+- [Deleting Custom Role](#Deleting-Custom-Role)
+- [Undeleting Custom Role](#Undeleting-Custom-Role)
+  
+[Miscellaneous](#miscellaneous)   
+- [Check if NGINX (or another other stuff is running)](#Is-NGINX-Running?)  
+- [Setting environment variables](#Setting-environment-variables)
+- [Setting a default compute zone](#Setting-a-default-compute-zone)
+- [List Forwarding Rules](#List-Forwarding-Rules)
+- [Perform Health Check](#Health-Check)
+[Others](#Others)  
+-  [Terms & Defintions](##Terms-&-Definitions)
+-  GCP Console Stuff
+   - [VPC Network Peering]([#VPC-Network-Peering](https://www.qwiklabs.com/focuses/964?parent=catalog))
+   - [User Authentication: Identity-Aware Proxy](https://www.qwiklabs.com/focuses/5562?parent=catalog)
+
+# Setup
+1. `gcloud config set project [PROJECT_ID]`
+2. Set basic configs
+   1. `gcloud config set compute/zone [zone]`
+   2. 
+# Load Balancers
+
+## Create Network Load Balancer
+```
+gcloud compute forwarding-rules create [lb-name] \
+         --region us-central1 \
+         --ports=80 \
+         --target-pool [Target_pool(created)]
+```
+> Allows you to balance the system's load based on incoming IP protocol data. IE: address, port, and protocol type.
+
+## Create HTTP(s) LB
+* Remember to perform a [health check](#Health-Check) first!
+```
+gcloud compute instance-groups managed \
+       set-named-ports [MIG (created)] \
+       --named-ports http:[port_num]
+```
+> Maps a port name to the relevant port for the `MIG` --> LB svc can now forward traffic to named port.
+# Firewall Rules
+```
+gcloud compute firewall-rules create [Firewall_RuleName(new)] --allow [rule]
+```
+> ie: rule can be `tcp:80`, which allows connections to the machines on port 80 via the `EXTERNAL_IP` addresses
+
+### Create Backend Service
+```
+gcloud compute backend-services create [backend_name(new)] \
+      --protocol HTTP --http-health-checks http-basic-check --global
+```
+> * The backend service configuration contains a set of values, such as the protocol used to connect to backends, various distribution and session settings, health checks, and timeouts.   
+> * These settings provide fine-grained control over how your load balancer behaves.
+
+### Create Default URL Map
+```
+gcloud compute url-maps create [Map_name(new)] \
+    --default-service [Backend_svc(created)]
+```
+> A default URL map that directs all incoming requests to all your backend instances
+
+### Create HTTP Proxy
+``` gcloud compute target-http-proxies create [Poxy_name(new)] \
+    --url-map [Url_map(created)]
+```
+> Routes request to the URL map
+
+### Create Global Forwarding Rule
+```
+gcloud compute forwarding-rules create http-content-rule \
+        --global \
+        --target-http-proxy [Proxy(created)] \
+        --ports [portnum]
+```
+
+Check your forwarding rules [here](##List-Forwarding-Rules)!
+> * Handles and routes incoming requests.
+> * Dends traffic to a specific target HTTP or HTTPS proxy depending on the IP address, IP protocol, and port specified. 
+> * The global forwarding rule does not support multiple ports.
+
+# Instance Templates & Groups
+
+## Create NGINX Web Server Clusters
+1. A startup script to be used by every virtual machine instance to setup Nginx server upon startup
+2. An instance template to use the startup script [Here](#Create-Instance-Templates)
+3. A target pool [Here](#Create-Target-Group)
+4. A managed instance group using the instance template [Here](#Create-MIG)
+
+
+## Create Instance Template
+```
+gcloud compute instance-templates create [Template(new)_Name] \
+         --metadata-from-file startup-script=startup.sh
+```
+
+`Startup.sh` example:
+```
+cat << EOF > startup.sh
+#! /bin/bash
+apt-get update
+apt-get install -y nginx
+service nginx start
+sed -i -- 's/nginx/Google Cloud Platform - '"\$HOSTNAME"'/' /var/www/html/index.nginx-debian.html
+EOF
+```
+
+## Create MIG
+```
+gcloud compute instance-groups managed create [Group_Name(new)] \
+         --base-instance-name [prefix_name(new)] \
+         --size [num] \
+         --template [Template(created)_Name] \
+         --target-pool [Target_Pool(created)]
+```
+> --base-instance-name is the name that will get prefixed with the created VMs in this MIG
+
+## Create Target Group
+```
+gcloud compute target-pools create [Pool_Name]
+```
+>  A target pool allows a single access point to all the instances in a group and is necessary for load balancing in the future steps.
+
+# Virtual Machines
+
+## Create VM Instance
+```
+gcloud compute instances create [instance name] --machine-type n1-standard-2 --zone [your_zone]
+```
+>If `your_zone` is set in the env variable, simply use `$ZONE` instead
+> --network and --subnet flags can be used
+
+## SSH Into VM
+```
+gcloud compute ssh [instance name] --zone [YOUR_ZONE]
+```
+
+# Kubernetes
+
+## Create a KE cluster
+```
+gcloud container clusters create [CLUSTER-NAME]
+```
+
+>A cluster consists of at least one cluster master machine and multiple worker machines called nodes. 
+>> Nodes: Compute Engine virtual machine (VM) instances that run the Kubernetes processes necessary to make them part of the cluster.
+
+## Get Authentication Credentials For Cluster
+```
+gcloud container clusters get-credentials [CLUSTER-NAME]
+```
+
+## Deploy Appplication To Cluster
+```
+kubectl create deployment [Deployment_Name] --image=gcr.io/google-samples/hello-app:1.0
+```
+
+> * Key in your own new deployment name  
+> * `gcr.io/google-samples/hello-app:1.0` is the app's container image, which gets pulled from the GCR bucket
+
+## K8s Service
+
+### Expose K8s Cluster 
+`kubectl expose deployment [Deployment_Name]--type=LoadBalancer --port [Port_Num]`
+>* --port specifies the port that the container exposes.
+> * type="LoadBalancer" creates a Compute Engine load balancer for your container.
+
+## Delete Cluster
+```
+gcloud container clusters delete [CLUSTER-NAME]
+```
+
+# IAM Custom Roles
+* Enables principle of least privilege
+* Created by combining one or more available Cloud IAM permissions, which are represented in the form: 
+```
+<service>.<resource>.<verb>
+```
+> * EG: compute.instances.list allows user to list the GCE instances (VMs)
+> * Permissions usually 1:1 to the REST methods
+
+* Caller requires `iam.roles.create` permission to create custom role
+
+## List Of Available Permissions
+```
+gcloud iam list-testable-permissions //cloudresourcemanager.googleapis.com/projects/$DEVSHELL_PROJECT_ID
+```
+> Gets the permissions that the current user can add/remove in the given role for the given resources
+
+## Get role metadata
+```
+gcloud iam roles describe [ROLE_NAME]
+```
+> Gets the role ID & permission contained in the role. IE roles/editor
+
+## Get Grantable Roles
+```
+gcloud iam list-grantable-roles //cloudresourcemanager.googleapis.com/projects/$DEVSHELL_PROJECT_ID
+```
+> Returns a list of all roles that can be applied to a given resource
+
+## Get Custom Roles
+```
+gcloud iam roles list --project $DEVSHELL_PROJECT_ID
+```
+> --show-deleted flag to list deleted roles
+```
+gcloud iam roles list
+```
+> Lists predefined roles
+
+## Create A Custom Role
+* Caller must possess `iam.roles.create` permission
+
+2 ways:
+1. [YAML file](#Create-Using-YAML-File) w/ role defintion 
+2. [Using flags](#Create-Using-Flags)
+
+### Create Using YAML File
+Example YAML File:
+```
+title: [ROLE_TITLE]
+description: [ROLE_DESCRIPTION]
+stage: [LAUNCH_STAGE]
+includedPermissions:
+- [PERMISSION_1]
+- [PERMISSION_2]
+```
+* [ROLE_TITLE] is a friendly title for the role, such as Role Viewer.
+* [ROLE_DESCRIPTION] is a short description about the role, such as My custom role description.
+* [LAUNCH_STAGE] indicates the stage of a role in the launch lifecycle, such as ALPHA, BETA, or GA.
+* `includedPermissions` specifies the list of one or more permissions to include in the custom role, such as iam.roles.get.
+
+Execute: 
+```
+gcloud iam roles create editor --project $DEVSHELL_PROJECT_ID \
+--file [File_name(created)].yaml
+```
+
+### Create Using Flags
+Example command:
+```
+gcloud iam roles create viewer --project $DEVSHELL_PROJECT_ID \
+--title "Role Viewer" --description "Custom role description." \
+--permissions compute.instances.get,compute.instances.list --stage ALPHA
+```
+
+### Update Existing Custom Role
+* Custom roles make use of `etag` property to prevent conflicting changes to a role made by different users at the same time.
+> Updates are only made if the user provided `etag` value matches the retrieved `etag` value from the existing role.
+```
+gcloud iam roles update
+```
+Used in two ways:
+1. [YAML File](#Update-Using-YAML-File) w/ updated role definition
+2. [Using Flags](#Update-Using-Flags)
+
+### Update Using YAML File
+1. Get current defintion of role: 
+```
+gcloud iam roles describe [ROLE_ID] --project $DEVSHELL_PROJECT_ID
+```
+2. Copy from (1) and create a new YAML file
+3. Update the file accordingly
+4. Use the update command w/ the filename
+```
+gcloud iam roles update [ROLE_ID] --project $DEVSHELL_PROJECT_ID \
+--file [new-role-definition(created)].yaml
+```
+> [Role_ID] can be retrieved from step (1)
+
+### Update Using Flags
+[List of all flags here](https://cloud.google.com/sdk/gcloud/reference/iam/roles/update)
+
+Examples: 
+1. --add-permissions
+2. --remove-permissions
+
+```
+gcloud iam roles update viewer --project $DEVSHELL_PROJECT_ID \
+--add-permissions storage.buckets.get,storage.buckets.list
+```
+
+>Seperate each permission with a comma
+
+## Disable Custom Role
+* Set --stage flag to DISABLED.
+```
+gcloud iam roles update viewer --project $DEVSHELL_PROJECT_ID \
+--stage DISABLED
+```
+## Deleting Custom Role
+```
+gcloud iam roles delete [ROLE_ID] --project $DEVSHELL_PROJECT_ID
+```
+> * Within 7 days: can be undeleted
+> * After 7 days, enters permanent deletion process that lasts 30 days
+> * After 37 days, [ROLE_ID] can be used again
+
+## Undeleting Custom Role
+```
+gcloud iam roles undelete [ROLE_ID] --project $DEVSHELL_PROJECT_ID
+```
+
+# Miscellaneous
+
+## Setting a default compute zone
+`gcloud config set compute/zone us-central1-a`
+>Your compute zone is an approximate regional location in which your clusters and their resources live.
+
+## Setting environment variables
+```
+export PROJECT_ID=<your_project_ID>
+```
+## Is NGINX Running?
+
+```
+ps auwx | grep nginx
+```
+
+## List-Forwarding-Rules
+```
+gcloud compute forwarding-rules list
+```
+
+## Health Check
+```
+gcloud compute http-health-checks create http-basic-check
+```
+>Health checks verify that the instance is responding to HTTP or HTTPS traffic
+
+
+# Others
+
+## Terms & Definitions
+
+
+
