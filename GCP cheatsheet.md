@@ -43,6 +43,17 @@
 - [Deleting Custom Role](#Deleting-Custom-Role)
 - [Undeleting Custom Role](#Undeleting-Custom-Role)
   
+[CFT Scoreboard & Policy Library Constraints](#CFT-Scoreboard)
+
+[VPC Network Peering](#VPC-Network-Peering)
+
+[Identity-Aware Proxy](#Identity-Aware-Proxy)
+
+[Cloud KMS - Encryption & Decryption](#Cloud-KMS)
+
+[VPC Networking](#VPC-Networking)
+- [Fundamentals](#VPC-Fundamentals)
+
 [Miscellaneous](#miscellaneous)   
 - [Check if NGINX (or another other stuff is running)](#Is-NGINX-Running?)  
 - [Setting environment variables](#Setting-environment-variables)
@@ -194,6 +205,53 @@ gcloud container clusters create [CLUSTER-NAME]
 >A cluster consists of at least one cluster master machine and multiple worker machines called nodes. 
 >> Nodes: Compute Engine virtual machine (VM) instances that run the Kubernetes processes necessary to make them part of the cluster.
 
+---
+### Create private cluster
+More details [here](https://www.qwiklabs.com/focuses/867?parent=catalog)
+```
+    --enable-private-nodes
+```
+1. Specify /28 CIDR range
+```
+    --master-ipv4-cidr 172.16.0.16/28
+```
+2. Enable IP aliases
+```
+    --enable-ip-alias
+```
+3. Can choose to create a custom subnetwork / let them create one for you
+- Let them create one for you:
+```
+    --create-subnetwork ""
+```
+> Use this flag on creating the private k8s cluster
+> 
+- Create a custom one:
+```
+gcloud compute networks subnets create my-subnet \
+    --network default \
+    --range 10.0.4.0/22 \
+    --enable-private-ip-google-access \
+    --region us-central1 \
+    --secondary-range my-svc-range=10.0.32.0/20,my-pod-range=10.4.0.0/14
+```
+> Requires 1x primary address range & 2x secondary address ranges
+```
+--subnetwork my-subnet \
+    --services-secondary-range-name my-svc-range \
+    --cluster-secondary-range-name my-pod-range
+```
+> Use these flags in creation of private k8s cluster
+> 
+
+4.  Will need to authorise external address ranges from accessing if needed, otherwise only addresses within the primary & secondary range will be allowed access.
+```
+gcloud container clusters update [cluster_name] \
+    --enable-master-authorized-networks \
+    --master-authorized-networks [MY_EXTERNAL_RANGE/32]
+```
+---
+
 ## Get Authentication Credentials For Cluster
 ```
 gcloud container clusters get-credentials [CLUSTER-NAME]
@@ -319,7 +377,7 @@ gcloud iam roles update [ROLE_ID] --project $DEVSHELL_PROJECT_ID \
 > [Role_ID] can be retrieved from step (1)
 
 ### Update Using Flags
-[List of all flags here](https://cloud.google.com/sdk/gcloud/reference/iam/roles/update)
+List of all flags [here](https://cloud.google.com/sdk/gcloud/reference/iam/roles/update)
 
 Examples: 
 1. --add-permissions
@@ -350,6 +408,171 @@ gcloud iam roles delete [ROLE_ID] --project $DEVSHELL_PROJECT_ID
 ```
 gcloud iam roles undelete [ROLE_ID] --project $DEVSHELL_PROJECT_ID
 ```
+
+# CFT Scoreboard
+Basic idea: Cloud Foundation Toolkit which helps administer policies into Google Cloud environment & determine where misconfigs are occuring.
+1. Set up Cloud Asset Inventory(CAI) (enable it)
+```
+gcloud services enable cloudasset.googleapis.com \
+    --project $GOOGLE_PROJECT
+```
+2. Create/get a Policy Library, copying a sample into /policies/constraints directory
+```
+git clone https://github.com/forseti-security/policy-library.git
+
+cp policy-library/samples/storage_blacklist_public.yaml policy-library/policies/constraints/
+```
+3. Create bucket to hold data that CAI will export into
+```
+gsutil mb -l us-central1 -p $GOOGLE_PROJECT gs://$CAI_BUCKET_NAME
+```
+4. Generate & export data using CAI into created bucket
+```
+# Export resource data
+gcloud asset export \
+    --output-path=gs://$CAI_BUCKET_NAME/resource_inventory.json \
+    --content-type=resource \
+    --project=$GOOGLE_PROJECT
+
+# Export IAM data
+gcloud asset export \
+    --output-path=gs://$CAI_BUCKET_NAME/iam_inventory.json \
+    --content-type=iam-policy \
+    --project=$GOOGLE_PROJECT
+```
+> CAI is generating data from the specified project and exporting it into specified output path
+5. Download and make executable the CFT scoreboard application
+```
+curl -o cft https://storage.googleapis.com/cft-cli/latest/cft-linux-amd64
+# make executable
+chmod +x cft
+```
+6. Run CFT scoreboard
+```
+./cft scorecard --policy-path=policy-library/ --bucket=$CAI_BUCKET_NAME
+```
+7. Proceed to update policies w/ more constraints (in /policy-library/policies/constraints) to be captured by the CFT scoreboard
+- Example constraint:
+```
+# Add a new policy to blacklist the IAM Owner Role
+cat > policy-library/policies/constraints/iam_whitelist_owner.yaml << EOF
+apiVersion: constraints.gatekeeper.sh/v1alpha1
+kind: GCPIAMAllowedBindingsConstraintV1
+metadata:
+  name: whitelist_owner
+  annotations:
+    description: List any users granted Owner
+spec:
+  severity: high
+  match:
+    target: ["organization/*"]
+    exclude: []
+  parameters:
+    mode: whitelist
+    assetType: cloudresourcemanager.googleapis.com/Project
+    role: roles/owner
+    members:
+    - "serviceAccount:admiral@qwiklabs-services-prod.iam.gserviceaccount.com"
+EOF
+```
+> Specifically whitelist only the specified member of the specified role. Any other users(members) with that role not whitelisted will be captured by the CFT. 
+
+# VPC Network Peering
+More details found [here](https://www.qwiklabs.com/focuses/964?parent=catalog)
+- Allows private connectivity across two VPC networks regardless of whether or not they belong to the same project or the same organization.
+  
+1. Configure the other parties network into the current project's network peering setting. Do for both side before it can work.
+
+# Identity-Aware Proxy
+More details [here](https://www.qwiklabs.com/focuses/5562?parent=catalog)
+- Basic idea: Control / restrict access to selected users for a application, using the app's domain & address
+- Can make use of Cryptographic Verification to ensure IAP is not bypassed/ turned off
+
+# Cloud KMS
+1. Enable Cloud KMS
+```
+gcloud services enable cloudkms.googleapis.com
+```
+2. Create KeyRing:
+```
+ gcloud kms keyrings create [KEYRING_NAME] --location global
+```
+3. Create CryptoKey:
+```
+gcloud kms keys create [CRYPTOKEY_NAME] --location global \
+      --keyring [KEYRING_NAME] \
+      --purpose encryption
+```
+>KeyRing stores CryptoKeys
+4. Encrypt data using `encrpyt endpoint`
+```
+curl -v "https://cloudkms.googleapis.com/v1/projects/$DEVSHELL_PROJECT_ID/locations/global/keyRings/$KEYRING_NAME/cryptoKeys/$CRYPTOKEY_NAME:encrypt" \
+  -d "{\"plaintext\":\"$PLAINTEXT\"}" \
+  -H "Authorization:Bearer $(gcloud auth application-default print-access-token)"\
+  -H "Content-Type: application/json" \
+  | jq .ciphertext -r > 1.encrypted
+```
+  - `PLAINTEXT=$(cat 1. | base64 -w0)`
+  >-  Encode fiile to be encrypted to base64 first --> allows binary data to be sent to API as plaintext  
+  > - `jq .ciphertext -r > 1.encrypted` uses cli utility `jq`  to parse out `ciphertext` property to file `1.encrypted`
+
+5. To decrypt/ check encrypted
+```
+curl -v "https://cloudkms.googleapis.com/v1/projects/$DEVSHELL_PROJECT_ID/locations/global/keyRings/$KEYRING_NAME/cryptoKeys/$CRYPTOKEY_NAME:decrypt" \
+  -d "{\"ciphertext\":\"$(cat 1.encrypted)\"}" \
+  -H "Authorization:Bearer $(gcloud auth application-default print-access-token)"\
+  -H "Content-Type:application/json" \
+| jq .plaintext -r | base64 -d
+```
+
+## IAM Permissions
+1. Manage KMS resources - `cloudkms.admin`
+```
+gcloud kms keyrings add-iam-policy-binding $KEYRING_NAME \
+    --location global \
+    --member user:$USER_EMAIL \
+    --role roles/cloudkms.admin
+```
+To get current authorized user:
+- ` USER_EMAIL=$(gcloud auth list --limit=1 2>/dev/null | grep '@' | awk '{print $2}')`
+  
+1. Encrypt & decrypt - `cloudkms.cryptoKeyEncrypterDecrypter`
+```
+gcloud kms keyrings add-iam-policy-binding $KEYRING_NAME \
+    --location global \
+    --member user:$USER_EMAIL \
+    --role roles/cloudkms.cryptoKeyEncrypterDecrypter
+```
+# VPC Networking
+
+## VPC Fundamentals
+Key learning points:  
+1. Default VPC Network
+   - Every subnet is associated with a GCP region & CIDR addr for IP addresses range and a gateway
+   - A route for each subnet and 1 for `Default internet gateway`(0.0.0.0./0)
+
+2. Default Firewall rules
+   - default-allow-icmp
+      - Allows ping to `External IP` from all IP addresses
+   - default-allow-internal
+      - allows all protocols to go through within the same network IP range (internal network ip addresses)
+   - default-allow-rdp
+       - allows rdp
+   - default-allows-ssh
+      - allows ssh from all IP addresses; tcp:22
+
+3. To create VM instance, there must be a VPC network
+
+---
+## Multiple VPC Networks
+Key learning points:
+1. Pinging External IP is dependent on ICMP firewall rule, independent of same/ different network its in
+2. Internal address: Only accessible by the same network (regardless of zone)
+3. VM instance can belong to > 1 network
+   - Number of interfaces allowed in instance is dependent on instance's machine type & num of vCPUs. ie 4vCPU --> 4 network interfaces --> up to 4 networks
+   - Every interface gets a route for the subnet that it is in
+   - Take note of `nic0` (primary interface eth0, the default route) -->  Any traffic other than the directly connected subnets will leave via this (can manually configure routes to change this behavior)
+
 
 # Miscellaneous
 
