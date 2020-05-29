@@ -7,6 +7,7 @@
   - [Create A Default URL Map](#Create-Default-URL-Map)
   - [Create A HTTP Proxy](#Create-HTTP-Proxy)
   - [Create Global Forwarding Rule](#Create-Global-Forwarding-Rule)
+- [Internal Load Balancer](#Internal-Load-Balancer)
  
 [Instance Templates & Groups](#Instance-Templates-&-Groups)
 
@@ -17,6 +18,7 @@
 - [Set Firewall Rule](#Firewall-Rules)  
 
 [Kubernetes](#Kubernetes)
+- [Fundamentals](#Fundamentals)
 - [Create a KE cluster](#Create-a-ke-cluster)
 - [Get Authentication Credentials For Cluster](#Get-Authentication-Credentials-For-Cluster)
 - [Deploy An Application To Cluster](#Deploy-appplication-to-cluster)
@@ -45,14 +47,14 @@
   
 [CFT Scoreboard & Policy Library Constraints](#CFT-Scoreboard)
 
-[VPC Network Peering](#VPC-Network-Peering)
-
 [Identity-Aware Proxy](#Identity-Aware-Proxy)
 
 [Cloud KMS - Encryption & Decryption](#Cloud-KMS)
 
 [VPC Networking](#VPC-Networking)
 - [Fundamentals](#VPC-Fundamentals)
+- [VPC Network Peering](#VPC-Network-Peering)
+- [Multiple VPC Networks](#Multiple-VPC-Networks)
 
 [Miscellaneous](#miscellaneous)   
 - [Check if NGINX (or another other stuff is running)](#Is-NGINX-Running?)  
@@ -63,7 +65,6 @@
 [Others](#Others)  
 -  [Terms & Defintions](##Terms-&-Definitions)
 -  GCP Console Stuff
-   - [VPC Network Peering]([#VPC-Network-Peering](https://www.qwiklabs.com/focuses/964?parent=catalog))
    - [User Authentication: Identity-Aware Proxy](https://www.qwiklabs.com/focuses/5562?parent=catalog)
 
 [Questions](#Questions)
@@ -133,11 +134,11 @@ Check your forwarding rules [here](##List-Forwarding-Rules)!
 > * Sends traffic to a specific target HTTP or HTTPS proxy depending on the IP address, IP protocol, and port specified. 
 > * The global forwarding rule does not support multiple ports.
 
-# Firewall Rules
-```
-gcloud compute firewall-rules create [Firewall_RuleName(new)] --allow [rule]
-```
-> ie: rule can be `tcp:80`, which allows connections to the machines on port 80 via the `EXTERNAL_IP` addresses
+---
+## Internal Load Balancer
+Key Learning pts:
+- Between VMs, must be within the same network & region. 
+--- 
 
 # Instance Templates & Groups
 
@@ -181,6 +182,12 @@ gcloud compute target-pools create [Pool_Name]
 ```
 >  A target pool allows a single access point to all the instances in a group and is necessary for load balancing (network)  in the future steps.
 
+## Firewall Rules
+```
+gcloud compute firewall-rules create [Firewall_RuleName(new)] --allow [rule]
+```
+> ie: rule can be `tcp:80`, which allows connections to the machines on port 80 via the `EXTERNAL_IP` addresses
+
 # Virtual Machines
 
 ## Create VM Instance
@@ -196,6 +203,54 @@ gcloud compute ssh [instance name] --zone [YOUR_ZONE]
 ```
 
 # Kubernetes
+
+## Fundamentals
+1. Cluster: 1 master node and the rest are worker nodes (min 1)
+2. Pods stores one/more containers, which are then stored in nodes
+    - Shared namespaces for contents (2 containers inside same pod can talk) & network namespace (1 IP addr per pod)
+    - Pods not meant to be persistent
+3. Services are created for pods, and can be implemented on pods with specified labels
+    - Services provides stable [endpoints](#what-is-an-endpoint) for Pods
+    - Provides different levels of access (External/Internal IPs)
+      1. ClusterIP (Internal) -- the default type means that this Service is only visible inside of the cluster
+      2. NodePort (External) -- gives each node in the cluster an externally accessible IP
+      3. LoadBalancer (External) --  adds a load balancer from the cloud provider which forwards traffic from the service to Nodes within it
+4. Deployments: Drive current state towards desired state
+    - On create deployment, creates the num of pods (based on `replica`) w/ specified containers within them
+## Managing Deployments Using KE
+1. Rolling update
+   - Triggered when deployment is edited
+      ```
+      kubectl edit deployment hello
+      ```
+   - View entries in rollout history
+      ```
+      kubectl rollout history deployment/hello
+      ```
+   - Pause rolling update
+      ```
+      kubectl rollout pause deployment/hello
+      ```
+   - View status
+      ```
+      kubectl rollout status deployment/hello
+      ```
+   - Resume rolling update
+      ```
+      kubectl rollout resume deployment/hello
+      ```
+   - Rollback rolling update
+      ```
+      kubectl rollout undo deployment/hello
+      ```
+2. Canary deployments -- to test new deployment in production with only a subset of users
+    - Service targets both the original stable deployment as well as the new canary deployment
+  - Chance of vising canary deployment dependd on proportion of original : canary replicas
+  - Can set `sessionAffinity` in service's spec to ensure user be served the same version (either original/canary), to avoid confusion
+3. Blue-green deployments
+   - Creating a deployment for a whole seperate new version, wait & check status for it to be completely deployed then switch
+   - To switch, simply update the service to point to a new selector (of the new deployment)
+   - To rollback, do change the service back to point to selector of previous deployment
 
 ## Create a KE cluster
 ```
@@ -477,12 +532,6 @@ EOF
 ```
 > Specifically whitelist only the specified member of the specified role. Any other users(members) with that role not whitelisted will be captured by the CFT. 
 
-# VPC Network Peering
-More details found [here](https://www.qwiklabs.com/focuses/964?parent=catalog)
-- Allows private connectivity across two VPC networks regardless of whether or not they belong to the same project or the same organization.
-  
-1. Configure the other parties network into the current project's network peering setting. Do for both side before it can work.
-
 # Identity-Aware Proxy
 More details [here](https://www.qwiklabs.com/focuses/5562?parent=catalog)
 - Basic idea: Control / restrict access to selected users for a application, using the app's domain & address
@@ -564,6 +613,13 @@ Key learning points:
 3. To create VM instance, there must be a VPC network
 
 ---
+## VPC Network Peering
+More details found [here](https://www.qwiklabs.com/focuses/964?parent=catalog)
+- Allows private connectivity across two VPC networks regardless of whether or not they belong to the same project or the same organization.
+  
+1. Configure the other parties network into the current project's network peering setting. Do for both side before it can work.
+---
+
 ## Multiple VPC Networks
 Key learning points:
 1. Pinging External IP is dependent on ICMP firewall rule, independent of same/ different network its in
@@ -572,6 +628,18 @@ Key learning points:
    - Number of interfaces allowed in instance is dependent on instance's machine type & num of vCPUs. ie 4vCPU --> 4 network interfaces --> up to 4 networks
    - Every interface gets a route for the subnet that it is in
    - Take note of `nic0` (primary interface eth0, the default route) -->  Any traffic other than the directly connected subnets will leave via this (can manually configure routes to change this behavior)
+
+---
+## VPC Networks - Controlling Access
+Key learning points:
+1. Can tag VM instances with network tags and create firewall rules that applies to instances with these network tags
+2. Service accounts - to be used by VM instances instead of actual users
+   1. Network Admin: Create, modify, delete networking resources (except firewall rules & SSL certificates)
+   2. Security Admin: Create, modify & delete firewall rules & SSL certificates
+3. Using svc accounts:
+   1. After creation & download of key pairs during creation of service account, SSH into VM instance and upload the keypair credentials (json)
+   2. Run `gcloud auth activate-service-account --key-file credentials.json` to authorize the VM instance with credentials of Svc acc, so VM instance can use it
+   3. Edit permissions @ IAM
 
 
 # Miscellaneous
@@ -612,4 +680,10 @@ gcloud compute http-health-checks create http-basic-check
 - Using firewall to allow tcp:80 to be able to connect to external IP of instances VS exposing a port of clusters using LB? 
 - Creating forwarding rule == creating Network LB?
 - Backend-services add MIG?
-> Backend services created through this command will start out without any backend groups. To add backend groups, use 'gcloud compute backend-services add-backend' or 'gcloud compute backend-services edit'.
+  - Backend services created through this command will start out without any backend groups. To add backend groups, use 'gcloud compute backend-services add-backend' or 'gcloud compute backend-services edit'.
+- Creating Load Balancer on GCP Console no need URL MAP, HTTP Proxies etc? But on CLI need? Plus on Console theres a firewall rule to allow for the healthcheck probe IP address to pass but on CLI we don't have that, only hace tcp:80? 
+
+
+### What is an endpoint?
+  - It is a to access its resources(eg a Pod) - the resource behind the 'endpoint'
+  - An IP to access a pod, like an object-oriented representation of a REST API endpoint
